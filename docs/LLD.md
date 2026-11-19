@@ -100,7 +100,7 @@ Prices are demo configuration values inherited from the Java source, not an asse
 
 ## 5. Token counting
 
-Cl100kTokenCounter uses SharpToken with cl100k_base. This matches the encoding name selected by the Java jtokkit TokenCounter.
+Cl100kTokenCounter uses SharpToken with cl100k_base. The `cl100k_base` encoding is configured explicitly in the .NET token counter.
 
 The unit test includes the known CL100K vector for “Hello, world!” (3 tokens). Before making a formal parity claim, run a larger golden-vector corpus from both Java and .NET and compare all counts.
 
