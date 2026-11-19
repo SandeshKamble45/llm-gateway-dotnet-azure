@@ -43,4 +43,4 @@ Redis integration tests cover sliding-window admission, concurrent token-bucket 
 - Redis Cluster hash-slot validation.
 - Reproducible .NET load test with p95/p99.
 
-Do not reuse Java benchmark numbers as .NET performance evidence.
+Do not present benchmark numbers from another implementation as performance evidence for this .NET implementation.
