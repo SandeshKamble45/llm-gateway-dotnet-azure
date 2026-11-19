@@ -2,7 +2,7 @@
 
 ## 1. Request orchestration
 
-GatewayService is the application use case. It validates the request, preserves the Java admission order and delegates all shared state transitions to IGatewayStateStore.
+GatewayService is the application use case. It validates the request, enforces a consistent admission sequence and delegates all shared state transitions to IGatewayStateStore.
 
 Dependency flow:
 
@@ -54,7 +54,7 @@ Atomic operations:
 
 ### Status scripts
 
-Status reads use Redis TIME as well. This removes the Java implementation's split-clock behaviour where mutation used Redis TIME but status calculations used the application machine clock.
+Status reads use Redis TIME as well. Using Redis TIME for both mutation and status calculations avoids clock drift between gateway replicas.
 
 ### Budget reservation
 
@@ -79,7 +79,7 @@ The script:
 - writes settlement details to the reservation hash,
 - refreshes the daily and reservation TTL.
 
-This improves on the Java settlement script, which accepted no reservation identifier and applied the adjustment each time it was called.
+The reservation identity makes settlement safe to retry: a repeated settlement returns the persisted result instead of applying the adjustment again.
 
 ## 3. Tenant key strategy
 
@@ -96,13 +96,13 @@ Configured pricing:
 - fallback-model: input 10,000; output 40,000.
 - gpt-5-mini: input 250,000; output 2,000,000.
 
-Prices are demo configuration values inherited from the Java source, not an assertion of live provider pricing. Keep prices in configuration and review against provider tariffs before any real billing use.
+Prices are demonstration configuration values, not an assertion of current provider tariffs. Keep prices in configuration and review them before any real billing use.
 
 ## 5. Token counting
 
 Cl100kTokenCounter uses SharpToken with cl100k_base. The `cl100k_base` encoding is configured explicitly in the .NET token counter.
 
-The unit test includes the known CL100K vector for “Hello, world!” (3 tokens). Before making a formal parity claim, run a larger golden-vector corpus from both Java and .NET and compare all counts.
+The unit test includes the known CL100K vector for “Hello, world!” (3 tokens). Before making a formal accuracy claim, run a larger golden-vector corpus across representative prompt text and compare the expected counts.
 
 ## 6. Provider routing
 
@@ -118,7 +118,7 @@ OpenAiLlmProvider:
 - reads usage.input_tokens and usage.output_tokens.
 - falls back to local CL100K counting if provider usage is missing/zero.
 
-The original Java provider did not send max_output_tokens even though the budget reservation assumed 150 output tokens. The .NET implementation now sends the limit to align the execution cap with the reservation calculation.
+The OpenAI adapter sends `max_output_tokens` to align the provider-side completion cap with the 150-token reservation assumption.
 
 ## 7. Polly resilience
 
