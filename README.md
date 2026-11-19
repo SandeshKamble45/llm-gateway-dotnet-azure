@@ -268,4 +268,4 @@ The current test suite validates core pricing, tenant validation, tokenizer beha
 
 ## Scope
 
-This repository is the standalone .NET 10 and Azure implementation. It contains no Java backend or Maven build. The Angular dashboard is included as the full-stack client.
+This repository contains a self-contained .NET 10 and Azure implementation with an Angular full-stack client.
