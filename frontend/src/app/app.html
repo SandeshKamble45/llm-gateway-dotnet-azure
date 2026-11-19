@@ -1,0 +1,691 @@
+
+  <div class="dashboard">
+
+    @if (!backendReady()) {
+
+    <section class="gateway-boot">
+
+    <div class="gateway-boot-content">
+
+      <p class="gateway-boot-eyebrow">
+        RATE LIMITING  |  COST CONTROL  |  RESILIENCE
+      </p>
+
+      <h1>LLM Gateway</h1>
+
+      <div class="gateway-boot-loader">
+        <span class="gateway-boot-spinner"></span>
+      </div>
+
+      <p class="gateway-boot-message">
+        {{ backendCheckMessage() }}
+      </p>
+
+      <p class="gateway-boot-description">
+        The backend may take a few seconds to start after scaling to zero.
+      </p>
+
+    </div>
+
+    </section>
+      
+
+    } @else {
+
+    <header class="dashboard-header">
+      <div class="header-copy">
+      
+        <h1>LLM Gateway</h1>
+        
+        <p class="subtitle">
+          Multi-tenant rate limiting, cost control &amp; provider resilience
+        </p>
+      </div>
+
+      <div class="header-status">
+        <span class="status-dot"></span>
+        <span>OPERATIONAL</span>
+      </div>
+    </header>
+
+    <div class="toolbar">
+
+      <div class="toolbar-contexts">
+
+        <div class="tenant-context">
+          <span class="label">TENANT</span>
+
+          <input
+            id="tenant-toolbar"
+            class="tenant-input"
+            type="text"
+            [value]="tenantId()"
+            (input)="onTenantIdChange($any($event.target).value)"
+            [disabled]="isSending()"
+            placeholder="Enter tenant ID"
+          />
+        </div>
+
+        <div class="model-context">
+          <span class="label">MODEL</span>
+
+          <select
+            id="model-selector"
+            class="model-select"
+            [value]="selectedModel()"
+            (change)="selectModel($any($event.target).value)"
+            [disabled]="isSending()"
+          >
+            <option value="primary-model">Mock Provider</option>
+            <option value="gpt-5-mini">GPT-5 mini · Live</option>
+          </select>
+
+          @if (liveModelEnabled()) {
+            <span class="live-model-badge">LIVE</span>
+          }
+        </div>
+
+      </div>
+
+      <button
+        class="refresh-button"
+        type="button"
+        (click)="refreshStatus()"
+      >
+        <span class="refresh-icon">↻</span>
+        Refresh
+      </button>
+
+    </div>
+
+
+    @if (status(); as gateway) {
+
+    <section class="metrics-grid">
+
+      <article class="metric-card">
+
+        <div class="card-header">
+          <div>
+            <p class="card-label">RATE LIMITING</p>
+            <h3>Token bucket</h3>
+          </div>
+
+          <span class="card-icon brand-icon">TB</span>
+        </div>
+
+        <div class="metric-value">
+          {{ gateway.tokenBucket.availableTokens | number: '1.0-0' }}
+
+          <span>
+            /
+            {{ gateway.tokenBucket.capacity | number: '1.0-0' }}
+          </span>
+        </div>
+
+        <div class="progress-track">
+          <div class="progress-fill brand-fill" [style.width.%]="
+              (gateway.tokenBucket.availableTokens /
+                gateway.tokenBucket.capacity) * 100
+            "></div>
+        </div>
+
+        <div class="metric-footer">
+          <span>Available capacity</span>
+
+          <strong>
+            {{ gateway.tokenBucket.refillRatePerSecond }} tokens/sec
+          </strong>
+        </div>
+
+      </article>
+
+
+      <article class="metric-card">
+
+        <div class="card-header">
+          <div>
+            <p class="card-label">REQUEST THROTTLE</p>
+            <h3>Sliding window</h3>
+          </div>
+
+          <span class="card-icon indigo-icon">RPM</span>
+        </div>
+
+        <div class="metric-value">
+          {{ gateway.slidingWindow.currentRequests }}
+
+          <span>
+            /
+            {{ gateway.slidingWindow.maxRequests }}
+          </span>
+        </div>
+
+        <div class="progress-track">
+          <div class="progress-fill indigo-fill" [style.width.%]="
+              (gateway.slidingWindow.currentRequests /
+                gateway.slidingWindow.maxRequests) * 100
+            "></div>
+        </div>
+
+        <div class="metric-footer">
+          <span>
+            {{ gateway.slidingWindow.windowSeconds }} second window
+          </span>
+
+          <strong>
+            {{ gateway.slidingWindow.remainingRequests }} remaining
+          </strong>
+        </div>
+
+      </article>
+
+
+      <article class="metric-card">
+
+        <div class="card-header">
+          <div>
+            <p class="card-label">COST CONTROL</p>
+            <h3>Daily budget</h3>
+          </div>
+
+          <span class="card-icon teal-icon">$</span>
+        </div>
+
+        <div class="metric-value cost-value">
+          ${{ gateway.dailyBudget.remainingMicrodollars / 1000000 | number: '1.2-6' }}
+        </div>
+
+        <div class="progress-track">
+          <div class="progress-fill teal-fill" [style.width.%]="
+              (
+                gateway.dailyBudget.remainingMicrodollars /
+                (
+                  gateway.dailyBudget.remainingMicrodollars +
+                  gateway.dailyBudget.spentMicrodollars
+                )
+              ) * 100
+            "></div>
+        </div>
+
+        <div class="metric-footer">
+          <span>
+            Spent:
+            ${{ gateway.dailyBudget.spentMicrodollars / 1000000 | number: '1.2-6' }}
+          </span>
+
+          <strong>
+            {{ gateway.dailyBudget.allowed ? 'Within budget' : 'Budget exceeded' }}
+          </strong>
+        </div>
+
+      </article>
+
+    </section>
+
+
+    <section class="main-grid">
+
+      <article class="panel playground">
+
+        <div class="panel-header">
+          <div>
+            <p class="card-label">REQUEST PLAYGROUND</p>
+
+            <h2>Send a request through the gateway</h2>
+
+            <p class="panel-description">
+              Execute a request through rate limiting, budget control
+              and provider resilience.
+            </p>
+          </div>
+
+          <span class="panel-tag">POST /chat</span>
+        </div>
+
+
+        <label for="prompt">Prompt</label>
+
+        <textarea id="prompt" rows="6" placeholder="Enter a prompt to send through the gateway..." [value]="prompt()"
+          (input)="onPromptChange($any($event.target).value)" [disabled]="isSending()"></textarea>
+
+
+        <div class="playground-footer">
+
+          <span class="prompt-hint">
+            {{ prompt().length }} / 10,000 characters
+          </span>
+
+          <button class="primary-button" type="button" (click)="sendRequest()" [disabled]="isSending()">
+
+            @if (isSending()) {
+
+            <span class="button-content">
+              <span class="button-spinner"></span>
+              Sending...
+            </span>
+
+            } @else {
+
+            <span class="button-content">
+              Send Request
+              <span class="button-arrow">→</span>
+            </span>
+
+            }
+
+          </button>
+
+        </div>
+
+      </article>
+
+
+      <article class="panel resilience-panel">
+
+        <div class="panel-header">
+
+          <div>
+            <p class="card-label">PROVIDER RESILIENCE</p>
+
+            <h2>Circuit Breaker</h2>
+
+            <p class="panel-description">
+              Provider failure protection and fallback state.
+            </p>
+          </div>
+
+          <span class="panel-tag">POLLY</span>
+
+        </div>
+
+
+        <div class="breaker-state">
+
+          <span class="status-dot" [class.open]="gateway.circuitBreaker.state !== 'CLOSED'"></span>
+
+          <span>
+            {{ gateway.circuitBreaker.state }}
+          </span>
+
+        </div>
+
+
+        <div class="details-list">
+
+          <div>
+            <span>Provider</span>
+
+            <strong class="provider-value">
+              {{ gateway.circuitBreaker.name }}
+            </strong>
+          </div>
+
+          <div>
+            <span>Failure rate</span>
+
+            <strong>
+              {{
+              gateway.circuitBreaker.failureRate < 0 ? '—' : gateway.circuitBreaker.failureRate + '%' }} </strong>
+          </div>
+
+          <div>
+            <span>Retry policy</span>
+
+            <strong class="value-success">
+              Enabled
+            </strong>
+          </div>
+
+          <div>
+            <span>Fallback provider</span>
+
+            <strong class="value-success">
+              Available
+            </strong>
+          </div>
+
+        </div>
+
+      </article>
+
+    </section>
+
+
+    <section class="panel pipeline-panel">
+
+      <div class="panel-header pipeline-header">
+
+        <div>
+          <p class="card-label">REQUEST PIPELINE</p>
+
+          <h2>Gateway execution flow</h2>
+
+          <p class="panel-description">
+            Each request passes through admission control, capacity
+            management, budget reservation, provider execution and settlement.
+          </p>
+        </div>
+
+        <span class="panel-tag">ATOMIC FLOW</span>
+
+      </div>
+
+
+      <div class="pipeline">
+
+        <div class="pipeline-step">
+          <span class="pipeline-number">01</span>
+
+          <div class="pipeline-content">
+            <strong>Rate limit</strong>
+            <span>Admission control</span>
+          </div>
+        </div>
+
+        <span class="pipeline-arrow">→</span>
+
+        <div class="pipeline-step">
+          <span class="pipeline-number">02</span>
+
+          <div class="pipeline-content">
+            <strong>Token bucket</strong>
+            <span>Capacity check</span>
+          </div>
+        </div>
+
+        <span class="pipeline-arrow">→</span>
+
+        <div class="pipeline-step">
+          <span class="pipeline-number">03</span>
+
+          <div class="pipeline-content">
+            <strong>Budget</strong>
+            <span>Atomic reservation</span>
+          </div>
+        </div>
+
+        <span class="pipeline-arrow">→</span>
+
+        <div class="pipeline-step">
+          <span class="pipeline-number">04</span>
+
+          <div class="pipeline-content">
+            <strong>LLM provider</strong>
+            <span>Primary / fallback</span>
+          </div>
+        </div>
+
+        <span class="pipeline-arrow">→</span>
+
+        <div class="pipeline-step">
+          <span class="pipeline-number">05</span>
+
+          <div class="pipeline-content">
+            <strong>Settlement</strong>
+            <span>Actual usage</span>
+          </div>
+        </div>
+
+      </div>
+
+    </section>
+
+
+    @if (requestError(); as requestError) {
+
+    <section class="request-error-panel">
+
+      <div class="error-indicator">!</div>
+
+      <div class="error-content">
+
+        <div class="error-heading">
+
+          <span class="error-title">
+            {{ requestError.title }}
+          </span>
+
+          <span class="error-status">
+            HTTP {{ requestError.status }}
+          </span>
+
+        </div>
+
+        <p>
+          {{ requestError.message }}
+        </p>
+
+        @if (requestError.retryAfterSeconds !== undefined) {
+
+        <div class="retry-info">
+
+          @if (retryCountdown() !== null) {
+          Retry available in
+          <strong>{{ retryCountdown() }}s</strong>
+          } @else {
+          Retry after
+          <strong>{{ requestError.retryAfterSeconds }}s</strong>
+          }
+
+        </div>
+
+        }
+
+      </div>
+
+    </section>
+
+    }
+
+
+    <section class="panel last-request">
+
+      <div class="panel-header">
+
+        <div>
+          <p class="card-label">REQUEST ACTIVITY</p>
+
+          <h2>Last Request</h2>
+
+          <p class="panel-description">
+            Gateway response, token usage and budget settlement.
+          </p>
+        </div>
+
+        @if (lastResponse()) {
+        <span class="success-badge">SUCCESS</span>
+        }
+
+      </div>
+
+
+      @if (lastResponse(); as result) {
+
+      <div class="request-summary">
+
+        <div class="summary-item summary-model">
+          <span>MODEL</span>
+          <strong>{{ result.response.modelUsed }}</strong>
+        </div>
+
+        <div class="summary-item summary-tokens">
+          <span>TOTAL TOKENS</span>
+          <strong>{{ result.response.usage.totalTokens }}</strong>
+        </div>
+
+        <div class="summary-item summary-input">
+          <span>INPUT</span>
+          <strong>{{ result.response.usage.inputTokens }}</strong>
+        </div>
+
+        <div class="summary-item summary-output">
+          <span>OUTPUT</span>
+          <strong>{{ result.response.usage.outputTokens }}</strong>
+        </div>
+
+        <div class="summary-item summary-latency">
+          <span>LATENCY</span>
+          <strong>{{ result.latencyMs }} ms</strong>
+        </div>
+
+        <div class="summary-item summary-estimated-cost">
+          <span>ESTIMATED COST</span>
+
+          <strong>
+            ${{ result.estimatedCostMicrodollars / 1000000 | number: '1.2-6' }}
+          </strong>
+        </div>
+
+        <div class="summary-item summary-actual-cost">
+          <span>ACTUAL COST</span>
+
+          <strong>
+            ${{ result.actualCostMicrodollars / 1000000 | number: '1.2-6' }}
+          </strong>
+        </div>
+
+      </div>
+
+
+      <div class="settlement">
+
+        <div class="settlement-reserved">
+          <span>Budget reserved</span>
+
+          <strong>
+            ${{ result.settlement.reservedMicrodollars / 1000000 | number: '1.2-6' }}
+          </strong>
+        </div>
+
+        <div class="settlement-actual">
+          <span>Actual usage</span>
+
+          <strong>
+            ${{ result.settlement.actualMicrodollars / 1000000 | number: '1.2-6' }}
+          </strong>
+        </div>
+
+        <div
+          class="settlement-adjustment"
+          [class.refund]="result.settlement.adjustmentMicrodollars < 0"
+          [class.settlement-adjustment-positive]="result.settlement.adjustmentMicrodollars > 0"
+        >
+          <span>Adjustment</span>
+
+          <strong>
+            ${{ result.settlement.adjustmentMicrodollars / 1000000 | number: '1.2-6' }}
+          </strong>
+        </div>
+
+      </div>
+
+
+      <div class="response-content">
+
+        <div class="response-header">
+
+          <span class="response-label">
+            MODEL RESPONSE
+          </span>
+
+          <span class="response-model">
+            {{ result.response.modelUsed }}
+          </span>
+
+        </div>
+
+        <div class="response-body">
+          <p>
+            {{ result.response.completion }}
+          </p>
+        </div>
+
+      </div>
+
+      } @else {
+
+      <div class="empty-state">
+
+        <div class="empty-icon">
+          →
+        </div>
+
+        <p>
+          No requests submitted yet
+        </p>
+
+        <span>
+          Send a request from the playground to see gateway activity.
+        </span>
+
+      </div>
+
+      }
+
+    </section>
+
+    }
+
+
+    @if (error(); as message) {
+
+    <div class="error-banner">
+      {{ message }}
+    </div>
+    }
+    }
+
+    @if (showLiveAccessModal()) {
+      <div class="demo-access-overlay">
+        <div
+          class="demo-access-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="live-model-title"
+        >
+          <div class="panel-header">
+            <div>
+              <p class="card-label">LIVE MODEL</p>
+
+              <h2 id="live-model-title">Enable live model</h2>
+
+              <p class="panel-description">
+                GPT-5 mini uses the configured OpenAI provider.
+              </p>
+            </div>
+          </div>
+
+          <label for="demo-access-code">Demo access code</label>
+
+          <input
+            #demoAccessCodeInput
+            id="demo-access-code"
+            type="password"
+            autocomplete="off"
+            placeholder="Enter demo access code"
+            [disabled]="isSending()"
+          />
+
+          <div class="demo-access-actions">
+            <button
+              class="secondary-button"
+              type="button"
+              (click)="cancelLiveModel()"
+            >
+              Cancel
+            </button>
+
+            <button
+              class="primary-button"
+              type="button"
+              (click)="enableLiveModel(demoAccessCodeInput.value)"
+            >
+              Enable Live Model
+            </button>
+          </div>
+        </div>
+      </div>
+    }
+
+  </div>

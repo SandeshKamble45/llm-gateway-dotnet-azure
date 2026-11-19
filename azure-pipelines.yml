@@ -1,0 +1,84 @@
+trigger:
+  branches:
+    include:
+      - main
+
+pr:
+  branches:
+    include:
+      - main
+
+variables:
+  buildConfiguration: Release
+  imageRepository: llm-gateway
+  imageTag: $(Build.SourceVersion)
+
+stages:
+- stage: Validate
+  displayName: Restore, build and test
+  jobs:
+  - job: BuildAndTest
+    pool:
+      vmImage: ubuntu-latest
+    steps:
+    - task: UseDotNet@2
+      displayName: Install .NET 10
+      inputs:
+        packageType: sdk
+        version: 10.0.x
+
+    - script: dotnet restore LlmGateway.sln
+      displayName: Restore
+
+    - script: dotnet build LlmGateway.sln --configuration $(buildConfiguration) --no-restore
+      displayName: Build
+
+    - script: dotnet test LlmGateway.sln --configuration $(buildConfiguration) --no-build --max-parallel-test-modules 2 --report-trx --results-directory "$(Agent.TempDirectory)/dotnet-tests"
+      displayName: Unit and Redis integration tests
+
+    - task: NodeTool@0
+      displayName: Install Node.js 22
+      inputs:
+        versionSpec: '22.x'
+
+    - script: npm ci
+      workingDirectory: frontend
+      displayName: Install Angular dependencies
+
+    - script: npm run build
+      workingDirectory: frontend
+      displayName: Build Angular dashboard
+
+    - task: PublishTestResults@2
+      condition: succeededOrFailed()
+      inputs:
+        testResultsFormat: VSTest
+        testResultsFiles: '*.trx'
+        searchFolder: $(Agent.TempDirectory)/dotnet-tests
+        failTaskOnFailedTests: true
+        failTaskOnMissingResultsFile: true
+
+- stage: Deploy
+  displayName: Build, push and deploy to Azure Container Apps
+  dependsOn: Validate
+  condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+  jobs:
+  - job: DeployContainerApp
+    pool:
+      vmImage: ubuntu-latest
+    steps:
+    - task: AzureCLI@2
+      displayName: Build and push image, then update Container App
+      inputs:
+        azureSubscription: $(azureServiceConnection)
+        scriptType: bash
+        scriptLocation: inlineScript
+        inlineScript: |
+          set -euo pipefail
+          az acr login --name "$(acrName)"
+          docker build --tag "$(acrLoginServer)/$(imageRepository):$(imageTag)" .
+          docker push "$(acrLoginServer)/$(imageRepository):$(imageTag)"
+          az containerapp update \
+            --name "$(containerAppName)" \
+            --resource-group "$(resourceGroup)" \
+            --image "$(acrLoginServer)/$(imageRepository):$(imageTag)"

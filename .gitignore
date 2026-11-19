@@ -1,0 +1,25 @@
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+infrastructure/azure/*.dev.json
+infrastructure/azure/*.secrets.json
+
+# .NET
+**/bin/
+**/obj/
+**/TestResults/
+**/artifacts/
+.vs/
+*.user
+*.suo
+
+# Node / Angular
+frontend/node_modules/
+frontend/dist/
+frontend/.angular/
+
+# IDE and OS
+.idea/
+.DS_Store
+Thumbs.db

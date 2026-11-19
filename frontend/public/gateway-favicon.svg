@@ -1,0 +1,67 @@
+<svg
+  xmlns="http://www.w3.org/2000/svg"
+  viewBox="0 0 128 128"
+  width="128"
+  height="128"
+  fill="none"
+>
+  <defs>
+    <!-- Emerald green -->
+    <linearGradient
+      id="gatewayGreen"
+      x1="18"
+      y1="20"
+      x2="104"
+      y2="108"
+      gradientUnits="userSpaceOnUse"
+    >
+      <stop offset="0" stop-color="#087F5B"/>
+      <stop offset="1" stop-color="#35B86B"/>
+    </linearGradient>
+
+    <!-- Golden yellow -->
+    <linearGradient
+      id="gatewayGold"
+      x1="60"
+      y1="68"
+      x2="110"
+      y2="68"
+      gradientUnits="userSpaceOnUse"
+    >
+      <stop offset="0" stop-color="#F6D365"/>
+      <stop offset="1" stop-color="#E5A92F"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Open three-sided gateway -->
+  <path
+    d="
+      M104 42
+      V20
+      H20
+      V108
+      H104
+    "
+    stroke="url(#gatewayGreen)"
+    stroke-width="12"
+    stroke-linecap="square"
+    stroke-linejoin="bevel"
+  />
+
+  <!-- Longer forward arrow -->
+  <path
+    d="M58 68H96"
+    stroke="url(#gatewayGold)"
+    stroke-width="12"
+    stroke-linecap="square"
+  />
+
+  <!-- Arrow head -->
+  <path
+    d="M88 57L100 68L88 79"
+    stroke="url(#gatewayGold)"
+    stroke-width="12"
+    stroke-linecap="square"
+    stroke-linejoin="miter"
+  />
+</svg>

@@ -1,0 +1,67 @@
+name: .NET 10 CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: dotnet-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Restore
+        run: dotnet restore LlmGateway.sln
+
+      - name: Build
+        run: dotnet build LlmGateway.sln --configuration Release --no-restore
+
+      - name: Test (Microsoft Testing Platform)
+        run: dotnet test LlmGateway.sln --configuration Release --no-build --max-parallel-test-modules 2 --report-trx --results-directory TestResults
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install Angular dependencies
+        run: npm ci
+        working-directory: frontend
+
+      - name: Build Angular dashboard
+        run: npm run build
+        working-directory: frontend
+
+      - name: Build container image
+        run: docker build --tag llm-gateway-dotnet:ci .
+
+      - name: Validate Azure Bicep templates
+        run: |
+          az bicep install
+          az bicep build --file infrastructure/azure/foundation.bicep --outfile /tmp/foundation.json
+          az bicep build --file infrastructure/azure/main.bicep --outfile /tmp/main.json
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dotnet-test-results
+          path: TestResults/**/*.trx
+          if-no-files-found: warn
