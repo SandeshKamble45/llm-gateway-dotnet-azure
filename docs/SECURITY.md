@@ -34,7 +34,7 @@
 
 ## Provider safeguards
 
-- The OpenAI adapter enforces max_output_tokens from the reservation policy. The original Java adapter did not include this limit in its request payload.
+- The OpenAI adapter enforces `max_output_tokens` from the reservation policy so the provider-side completion cap stays aligned with the reserved budget.
 - The resilience pipeline retries only an explicit HTTP 429 rejection. It does not blindly retry provider POST requests after an ambiguous timeout or 5xx.
 - If the primary provider fails, the configured fallback model can return a response. Pricing is based on the model actually returned.
 - Do not log prompts, tokens, API keys, demo access codes or raw tenant identifiers.
