@@ -78,9 +78,9 @@ Admission, reservation, provider invocation and settlement form one tightly orde
 
 The code still has Domain, Application, Infrastructure and API boundaries. Extract a service only when independent scaling, ownership or data isolation justifies the operational cost.
 
-## 9. How does the .NET implementation preserve the Java tokenizer?
+## 9. How is token counting performed?
 
-The Java source uses jtokkit CL100K_BASE. The .NET code uses SharpToken with cl100k_base and reuses one encoding instance. A known token vector is covered by a unit test. A larger cross-language golden corpus is still required before claiming exhaustive tokenizer parity.
+The gateway uses SharpToken with `cl100k_base` and reuses one encoding instance. A known token vector is covered by unit tests. A broader golden-vector corpus is still required before claiming exhaustive tokenizer parity.
 
 ## 10. How does Azure identity work?
 
