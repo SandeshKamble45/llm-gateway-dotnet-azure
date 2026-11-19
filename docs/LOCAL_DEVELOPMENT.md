@@ -8,7 +8,7 @@
 
 ## Run with Docker Compose
 
-From the `dotnet/` directory:
+From the repository root:
 
 ```bash
 docker compose up --build
