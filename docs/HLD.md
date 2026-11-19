@@ -114,7 +114,7 @@ The reservation ID carries the UTC date so a request crossing midnight settles a
 - Overall provider execution timeout: 40 seconds.
 - Fallback provider is deterministic and reports its own model name.
 
-The Java Resilience4j configuration used a count-based 20-call window. The Polly pipeline uses a time-based sampling duration; this is a deliberate implementation difference and must be tested under load.
+The Polly pipeline uses a time-based sampling duration. Validate its behaviour under the target request mix and failure rate before choosing production thresholds.
 
 ## 7. Security boundary
 
