@@ -16,7 +16,7 @@ The gateway independently controls:
 - **Estimated input-token admission** with a Redis token bucket.
 - **Tenant spend** with atomic budget reservations in integer microdollars.
 - **Provider execution** with bounded resilience policies and a fallback provider.
-- **Actual usage** with post-response cost calculation and reservation settlement.
+- **Actual usage** with post-response cost calculation and reservation settlement.\n- **HTTP request idempotency** with Redis-backed request fingerprints and response replay.
 
 ## Request lifecycle
 
@@ -99,7 +99,7 @@ The backend is structured as a modular monolith. The request lifecycle has an or
 - Model-specific pricing configuration.
 - Estimated cost reservation before provider execution.
 - Actual usage-based settlement after the provider response.
-- Budget reservation settlement is replay-safe at the Redis reservation level.
+- Budget reservation settlement is replay-safe at the Redis reservation level.\n- Tenant-scoped Idempotency-Key records serialize concurrent requests and replay completed HTTP responses.
 
 ### Observability and cloud readiness
 
@@ -254,7 +254,7 @@ Do not treat Bicep compilation as proof of an Azure deployment. The deployment s
 
 The following are explicit follow-up items; they are not claimed as complete:
 
-- Full HTTP idempotency with response replay for repeated `Idempotency-Key` values.
+- Recovery or administrative release for idempotency records left in progress after cancellation/process termination.
 - Reconciliation of reservations left open by cancellation, process termination, or uncertain provider outcomes.
 - API contract tests using `WebApplicationFactory`.
 - JWT authentication and cross-tenant authorization tests.
@@ -264,7 +264,7 @@ The following are explicit follow-up items; they are not claimed as complete:
 - A reproducible .NET load test with documented concurrency, workload, p95, and p99 latency.
 - A verified Azure deployment and .NET live demo.
 
-The current test suite validates core pricing, tenant validation, tokenizer behavior, and Redis atomicity/concurrency scenarios. See [TESTING.md](docs/TESTING.md) for the coverage and production-parity gaps.
+The current test suite validates core pricing, tenant validation, tokenizer behavior, Redis limiter/budget atomicity, and idempotency-store state transitions. See [TESTING.md](docs/TESTING.md) for the coverage and production-parity gaps.
 
 ## Scope
 

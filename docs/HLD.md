@@ -23,7 +23,7 @@ The gateway sits between clients and LLM providers. It enforces independent limi
       +-- sliding window sorted sets
       +-- token bucket hashes
       +-- daily budget counters
-      +-- reservation ledger
+      +-- reservation ledger\n      +-- idempotency request records
 
 Cloud runtime:
 - Azure Container Apps Consumption environment.
@@ -71,7 +71,7 @@ All limiter and budget mutations execute inside Redis Lua scripts. The applicati
 - Sliding window: ratelimit:sw:{tenantKey}
 - Token bucket: ratelimit:tb:{tenantKey}:modelKey
 - Daily spend: quota:daily:{tenantKey:utcDate}
-- Reservation: quota:reservation:{tenantKey:utcDate}:reservationId
+- Reservation: quota:reservation:{tenantKey:utcDate}:reservationId\n- Idempotency: idempotency:chat:{tenantKey}:sha256(idempotencyKey)
 
 The daily key and reservation key share a Redis Cluster hash tag so settlement can update both in one Lua call if Redis Cluster is used.
 
@@ -100,6 +100,19 @@ Daily budget is stored in integer microdollars. Default is 5,000,000 microdollar
 Reservation Lua atomically checks available budget, increments spend and writes a reservation ledger record. Settlement Lua verifies the reservation, applies actual-minus-reserved adjustment and writes settlement results. Repeated settlement for the same reservation ID returns the stored result without applying the adjustment twice.
 
 The reservation ID carries the UTC date so a request crossing midnight settles against the original day's bucket.
+
+### Request idempotency
+
+The API uses a separate Redis hash per tenant and SHA-256 hash of the client idempotency key. The request fingerprint is a SHA-256 hash of the normalized tenant, prompt, model and demo access code.
+
+Lua scripts provide atomic begin, complete and release transitions:
+- `in_progress` is claimed by exactly one request.
+- The same key with a different fingerprint is rejected.
+- A completed record stores HTTP status, content type and response body for exact replay.
+- A successful replay includes the `Idempotency-Replayed: true` response header.
+- Default retention is 93,600 seconds (26 hours).
+
+Deterministic validation happens before key acquisition. Quota/provider outcomes after acquisition are cached. Cancellation or process failure after acquisition leaves the key in progress until TTL expiry; this is a deliberate fail-closed policy while provider outcome reconciliation is not implemented.
 
 ## 6. Provider resilience
 
@@ -150,7 +163,7 @@ Do not attach prompts, raw tenant identifiers or credentials as metric labels.
 - Azure Functions background reconciliation.
 - Full production OIDC frontend.
 - Private networking/Private Link deployment.
-- Full HTTP idempotency response replay cache.
+- Automatic recovery or operator release for an idempotency key left in progress after an uncertain provider outcome.
 - Distributed reservation reconciliation after process termination.
 - Multi-region active-active Redis.
 

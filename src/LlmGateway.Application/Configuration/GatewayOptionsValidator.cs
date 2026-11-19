@@ -11,6 +11,7 @@ public sealed class GatewayOptionsValidator : IValidateOptions<GatewayOptions>
         if (options.MaxOutputTokens <= 0) errors.Add("Gateway:MaxOutputTokens must be positive.");
         if (options.DailyBudgetMicrodollars <= 0) errors.Add("Gateway:DailyBudgetMicrodollars must be positive.");
         if (options.DailyKeyTtlSeconds < 86_400) errors.Add("Gateway:DailyKeyTtlSeconds must be at least 86400.");
+        if (options.IdempotencyKeyTtlSeconds < 60) errors.Add("Gateway:IdempotencyKeyTtlSeconds must be at least 60.");
         if (options.SlidingWindowSeconds <= 0 || options.SlidingWindowMaxRequests <= 0)
             errors.Add("Sliding window duration and request limit must be positive.");
         if (options.TokenBucketCapacity <= 0 || options.TokenBucketRefillRatePerSecond <= 0)

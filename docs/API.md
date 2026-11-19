@@ -14,7 +14,7 @@ The Angular development proxy uses /api/v1/gateway and removes the /api prefix b
 
 - Content-Type: application/json
 - X-Demo-Access-Code: optional demo model gate
-- Idempotency-Key: optional stable identifier used to make the budget reservation mutation replay-safe
+- Idempotency-Key: optional client-generated key, 1–128 visible characters, scoped to the normalized tenant ID
 
 ### Request
 
@@ -67,7 +67,7 @@ Numeric cost values in this example are illustrative; actual amounts are calcula
 | 400 | Invalid body, tenant ID, prompt, model or oversized input | String message |
 | 402 | Daily tenant budget could not be reserved | BudgetReservationResult |
 | 403 | Missing/invalid demo access code or tenant claim mismatch | String message |
-| 409 | Reservation identity is already in progress or has already been settled | BudgetReservationResult |
+| 409 | Idempotency key is in progress, was used with a different payload, or an underlying budget reservation already exists | String message or BudgetReservationResult |
 | 429 | Sliding-window or token-bucket rejection | RateLimitResult |
 | 502 | Provider unavailable | GatewayErrorResponse |
 
@@ -75,7 +75,21 @@ Numeric cost values in this example are illustrative; actual amounts are calcula
 
 Provider error response properties: message, releasedReservationMicrodollars and settlement.
 
-The current Idempotency-Key is used to derive a stable budget reservation identity. A second use while the first reservation is in progress or after it is settled returns HTTP 409, preventing a second provider call. It does not yet implement an HTTP response replay cache. Do not describe it as full end-to-end request idempotency.
+The idempotency record is separate from the budget reservation ledger. It owns the HTTP request lifecycle and replays completed responses; the budget reservation continues to protect the monetary ledger. Both use tenant-scoped Redis keys and bounded retention.
+
+### Idempotency-Key semantics
+
+When supplied, the API validates the request before acquiring the key. The request fingerprint covers the normalized tenant ID, prompt, normalized model, and demo access code. The raw idempotency key is SHA-256 hashed before it is used in the Redis key.
+
+- The first request atomically creates an `in_progress` record before consuming rate-limit or token capacity.
+- A concurrent request with the same key and same fingerprint receives HTTP 409 while the original is in progress.
+- Reusing the key with a different fingerprint receives HTTP 409.
+- Once a response is completed, its HTTP status, content type, and serialized body are stored. A later request receives the same response with `Idempotency-Replayed: true`.
+- Admission outcomes that occur after the key is acquired (such as 402 or 429) are also stored and replayed. Validation failures (400/403) occur before acquisition and do not lock the key.
+- The default record TTL is 93,600 seconds (26 hours), configured by `Gateway:IdempotencyKeyTtlSeconds`.
+- If a request is cancelled or the process fails after acquisition but before the response is persisted, the record remains `in_progress` until its TTL expires. The API fails closed rather than risking a second provider call that could incur duplicate cost.
+
+Clients should reuse the same key only when retrying the same logical request. Use a new key for a new operation. Requests without an Idempotency-Key retain the non-idempotent behaviour.
 
 ## GET /v1/gateway/status?tenantId=tenant-1
 

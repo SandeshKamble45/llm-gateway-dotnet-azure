@@ -1,10 +1,11 @@
-using LlmGateway.Application.Services;
+using System.Text.Json;
 using LlmGateway.Application.Abstractions;
 using LlmGateway.Application.Configuration;
-using Microsoft.Extensions.Options;
+using LlmGateway.Application.Services;
 using LlmGateway.Domain;
 using LlmGateway.Infrastructure;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Options;
 
 namespace LlmGateway.Api.Controllers;
 
@@ -13,9 +14,13 @@ namespace LlmGateway.Api.Controllers;
 public sealed class GatewayController(
     GatewayService gateway,
     IGatewayStateStore stateStore,
+    IIdempotencyStore idempotencyStore,
     ProviderResiliencePipeline providerResilience,
-    IOptions<AuthenticationOptions> authenticationOptions) : ControllerBase
+    IOptions<AuthenticationOptions> authenticationOptions,
+    IOptions<JsonOptions> jsonOptions) : ControllerBase
 {
+    private const string JsonContentType = "application/json; charset=utf-8";
+
     [HttpPost("chat")]
     [ProducesResponseType(typeof(GatewayResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -35,14 +40,15 @@ public sealed class GatewayController(
         if (!IsTenantAuthorized(request.TenantId))
             return Forbid();
 
-        if (!string.IsNullOrWhiteSpace(idempotencyKey) && idempotencyKey.Length > 128)
-            return BadRequest("Idempotency-Key cannot exceed 128 characters.");
+        var key = string.IsNullOrWhiteSpace(idempotencyKey) ? null : idempotencyKey.Trim();
+        if (key is not null && (key.Length > 128 || key.Any(char.IsControl)))
+            return BadRequest("Idempotency-Key must contain 1–128 visible characters.");
 
+        string tenantId;
         try
         {
-            var response = await gateway.ProcessAsync(
-                request, demoAccessCode, idempotencyKey, cancellationToken);
-            return Ok(response);
+            // Preflight happens before a key is acquired and before any quota state is changed.
+            tenantId = gateway.ValidateRequest(request, demoAccessCode);
         }
         catch (GatewayException exception)
         {
@@ -52,6 +58,90 @@ public sealed class GatewayController(
         {
             return BadRequest(exception.Message);
         }
+
+        if (key is null)
+        {
+            try
+            {
+                var response = await gateway.ProcessAsync(request, demoAccessCode, null, cancellationToken);
+                return Ok(response);
+            }
+            catch (GatewayException exception)
+            {
+                return StatusCode(exception.StatusCode, exception.Payload ?? exception.Message);
+            }
+            catch (ArgumentException exception)
+            {
+                return BadRequest(exception.Message);
+            }
+        }
+
+        var fingerprint = IdempotencyRequestFingerprint.Create(request, demoAccessCode);
+        var start = await idempotencyStore.BeginAsync(tenantId, key, fingerprint, cancellationToken);
+
+        switch (start.State)
+        {
+            case IdempotencyRequestState.PayloadMismatch:
+                return Conflict("Idempotency-Key was already used with a different request payload.");
+            case IdempotencyRequestState.InProgress:
+                return Conflict("A request with this Idempotency-Key is still in progress. Do not submit it with a new key.");
+            case IdempotencyRequestState.Completed:
+                Response.Headers["Idempotency-Replayed"] = "true";
+                return new ContentResult
+                {
+                    Content = start.ResponseBody,
+                    ContentType = start.ContentType,
+                    StatusCode = start.StatusCode
+                };
+            case IdempotencyRequestState.Acquired:
+                break;
+            default:
+                throw new InvalidOperationException($"Unsupported idempotency state: {start.State}.");
+        }
+
+        try
+        {
+            var response = await gateway.ProcessAsync(request, demoAccessCode, key, cancellationToken);
+            return await CompleteAndReturnAsync(
+                tenantId, key, fingerprint, StatusCodes.Status200OK, response);
+        }
+        catch (GatewayException exception)
+        {
+            // Cache deterministic admission/provider outcomes too: they may follow a consumed
+            // sliding-window or token-bucket admission, or a provider operation that already ran.
+            return await CompleteAndReturnAsync(
+                tenantId,
+                key,
+                fingerprint,
+                exception.StatusCode,
+                exception.Payload ?? exception.Message);
+        }
+        catch (ArgumentException exception)
+        {
+            return await CompleteAndReturnAsync(
+                tenantId, key, fingerprint, StatusCodes.Status400BadRequest, exception.Message);
+        }
+        // Do not release on cancellation or unexpected errors after acquisition. The provider may
+        // have received the request; leaving the record in_progress is safer than duplicating a charge.
+    }
+
+    private async Task<IActionResult> CompleteAndReturnAsync(
+        string tenantId,
+        string key,
+        string fingerprint,
+        int statusCode,
+        object payload)
+    {
+        var body = JsonSerializer.Serialize(payload, jsonOptions.Value.JsonSerializerOptions);
+        await idempotencyStore.CompleteAsync(
+            tenantId, key, fingerprint, statusCode, JsonContentType, body, CancellationToken.None);
+
+        return new ContentResult
+        {
+            Content = body,
+            ContentType = JsonContentType,
+            StatusCode = statusCode
+        };
     }
 
     [HttpGet("status")]

@@ -17,7 +17,28 @@ Dependency flow:
       +--------------- ILlmProvider
       +--------------- GatewayMetrics
 
-## 2. Redis state store
+## 2. Idempotency store
+
+`RedisIdempotencyStore` owns the HTTP idempotency lifecycle independently from the budget ledger.
+
+Redis key:
+- `idempotency:chat:{tenantKey}:sha256(idempotencyKey)`
+
+The tenant is the Redis Cluster hash tag. The raw key is not stored. The value is a Redis hash containing:
+- `status`: in_progress or completed
+- `request_fingerprint`: SHA-256 of normalized tenant, prompt, normalized model, and demo access code
+- `status_code`, `content_type`, `response_body`: completed HTTP response fields
+
+Lua transitions:
+1. Begin: create the in-progress record if absent; otherwise compare the fingerprint and return payload-mismatch, in-progress, or completed.
+2. Complete: only the request with the matching fingerprint can change its in-progress record to completed.
+3. Release: only the matching fingerprint can delete an in-progress record.
+
+The default TTL is 93,600 seconds. Completed records replay the original status/body/content type. The API returns HTTP 409 for same-key concurrency and changed payload. Preflight validation runs before acquisition; 402/429/502 outcomes after acquisition are cached because they may follow limiter mutations or provider execution.
+
+A cancellation or process termination after acquisition leaves the record in progress until TTL expiry. The system fails closed rather than repeating a provider POST with uncertain outcome.
+
+## 3. Redis state store
 
 RedisGatewayStateStore uses a singleton IConnectionMultiplexer and one IDatabase instance. Lua source files are embedded resources in the Infrastructure assembly and invoked with ScriptEvaluateAsync.
 
@@ -81,13 +102,13 @@ The script:
 
 The reservation identity makes settlement safe to retry: a repeated settlement returns the persisted result instead of applying the adjustment again.
 
-## 3. Tenant key strategy
+## 4. Tenant key strategy
 
 Tenant IDs must match the application identifier policy: 1–128 characters; letters, digits, period, underscore and hyphen. The validated value is Base64URL-encoded before being used in Redis key names.
 
 This prevents untrusted delimiter characters from changing key structure. It is not a replacement for authenticated tenant identity.
 
-## 4. Pricing
+## 5. Pricing
 
 ModelPricing stores integer microdollars per million tokens. Cost uses checked 64-bit integer multiplication and division. Positive token usage is rounded up to at least one microdollar to avoid free positive-usage calls due to truncation.
 
@@ -98,13 +119,13 @@ Configured pricing:
 
 Prices are demonstration configuration values, not an assertion of current provider tariffs. Keep prices in configuration and review them before any real billing use.
 
-## 5. Token counting
+## 6. Token counting
 
 Cl100kTokenCounter uses SharpToken with cl100k_base. The `cl100k_base` encoding is configured explicitly in the .NET token counter.
 
 The unit test includes the known CL100K vector for “Hello, world!” (3 tokens). Before making a formal accuracy claim, run a larger golden-vector corpus across representative prompt text and compare the expected counts.
 
-## 6. Provider routing
+## 7. Provider routing
 
 ProviderRouter routes:
 - primary-model to the deterministic mock provider when Gateway.Provider=mock.
@@ -120,7 +141,7 @@ OpenAiLlmProvider:
 
 The OpenAI adapter sends `max_output_tokens` to align the provider-side completion cap with the 150-token reservation assumption.
 
-## 7. Polly resilience
+## 8. Polly resilience
 
 ProviderResiliencePipeline has:
 - retry: one additional attempt, 200 ms initial delay, exponential backoff with jitter; only ProviderRateLimitedException (HTTP 429) is retryable.
@@ -129,14 +150,14 @@ ProviderResiliencePipeline has:
 
 It intentionally does not retry an ambiguous timeout or generic 5xx response for an LLM POST, because the provider may have processed and billed the request already.
 
-## 8. Budget lifecycle limitations
+## 9. Budget lifecycle limitations
 
 - Provider fallback uses fallback-model pricing during settlement.
 - Cancellation keeps the reservation because the provider might have processed the request.
 - An abnormal process termination after reservation can leave the reservation accounted in the daily counter until TTL expiry. A reconciliation worker/ledger is not yet implemented.
-- The HTTP Idempotency-Key currently gives the reservation an identity; it is not a full HTTP response cache. Same-key concurrency and replay response semantics remain an outstanding task.
+- An idempotency key left in progress after cancellation or process failure remains blocked until its retention TTL expires. A reconciliation or administrative release workflow is not yet implemented.
 
-## 9. API DTOs
+## 10. API DTOs
 
 Domain records serialize with ASP.NET Core web defaults (camelCase). The contract fields mirror the Angular interfaces:
 - ChatRequest: tenantId, prompt, model

@@ -24,7 +24,7 @@ Redis integration tests use Testcontainers.Redis and execute the production Lua 
 
 Unit tests cover integer microdollar pricing, rounding/overflow, tenant ID validation and key encoding, and CL100K token counting.
 
-Redis integration tests cover sliding-window admission, concurrent token-bucket admissions, concurrent tenant budget reservations, duplicate settlement, in-progress/settled reservation rejection, and tenant isolation.
+Redis integration tests cover sliding-window admission, concurrent token-bucket admissions, concurrent tenant budget reservations, duplicate settlement, in-progress/settled reservation rejection, and tenant isolation. Idempotency tests cover one-owner concurrent acquisition, in-progress responses, changed-payload conflict, exact completed-response replay, owner-only completion, safe release, and tenant isolation. Unit tests cover stable and payload-sensitive request fingerprints.
 
 ## CI
 
@@ -36,8 +36,8 @@ Redis integration tests cover sliding-window admission, concurrent token-bucket 
 - JWT valid/invalid audience and cross-tenant denial tests.
 - Provider fallback and circuit-breaker recovery tests.
 - Retry behaviour for explicit 429 and no-retry tests for timeout/5xx.
-- Cancellation and reservation reconciliation.
-- Same Idempotency-Key concurrency and response replay semantics.
+- Cancellation and reconciliation of budget reservations and idempotency records left in progress.
+- API-level WebApplicationFactory tests for idempotency response replay, status codes, and the Idempotency-Replayed header.
 - Multi-model isolation tests.
 - Sliding-window expiry and Retry-After accuracy.
 - Redis Cluster hash-slot validation.

@@ -35,12 +35,15 @@ public sealed class GatewayService
         _metrics = metrics;
     }
 
-    public async Task<GatewayResponse> ProcessAsync(
-        ChatRequest request,
-        string? demoAccessCode,
-        string? idempotencyKey,
-        CancellationToken cancellationToken)
+    /// <summary>
+    /// Runs all deterministic request validation before any limiter or budget state is mutated.
+    /// The controller calls this before acquiring an idempotency key so invalid requests do not
+    /// leave a key locked or consume quota.
+    /// </summary>
+    public string ValidateRequest(ChatRequest request, string? demoAccessCode)
     {
+        ArgumentNullException.ThrowIfNull(request);
+
         if (string.IsNullOrWhiteSpace(request.TenantId))
             throw new GatewayException(400, "tenantId is required");
         if (string.IsNullOrWhiteSpace(request.Prompt))
@@ -52,15 +55,35 @@ public sealed class GatewayService
         try { tenantId = TenantId.Normalize(request.TenantId); }
         catch (ArgumentException ex) { throw new GatewayException(400, ex.Message); }
 
-        _metrics.RecordRequest();
-
-        var model = string.IsNullOrWhiteSpace(request.Model) ? _provider.PrimaryModel : request.Model.Trim();
+        var model = ResolveModel(request);
         if (!string.Equals(model, _provider.PrimaryModel, StringComparison.Ordinal) &&
             (string.IsNullOrWhiteSpace(_demoAccessCode) ||
              !FixedTimeEquals(_demoAccessCode, demoAccessCode)))
             throw new GatewayException(403, "Invalid or missing demo access code");
 
-        // Preserve the original admission order: request count, estimated input tokens, then monetary budget.
+        var estimatedInputTokens = Math.Max(1, _tokenCounter.CountTokens(request.Prompt));
+        if (estimatedInputTokens > _options.TokenBucketCapacity)
+            throw new GatewayException(400, "Estimated prompt tokens exceed the configured token-bucket capacity.");
+
+        try { _ = _pricing.GetPricing(model); }
+        catch (ArgumentException ex) { throw new GatewayException(400, ex.Message); }
+
+        return tenantId;
+    }
+
+    public async Task<GatewayResponse> ProcessAsync(
+        ChatRequest request,
+        string? demoAccessCode,
+        string? idempotencyKey,
+        CancellationToken cancellationToken)
+    {
+        var tenantId = ValidateRequest(request, demoAccessCode);
+        var model = ResolveModel(request);
+        var estimatedInputTokens = Math.Max(1, _tokenCounter.CountTokens(request.Prompt));
+
+        _metrics.RecordRequest();
+
+        // Request frequency, token capacity and monetary budget remain independent admission controls.
         var requestLimit = await _state.ConsumeSlidingWindowAsync(tenantId, cancellationToken);
         if (!requestLimit.Allowed)
         {
@@ -68,21 +91,15 @@ public sealed class GatewayService
             throw new GatewayException(429, "Request rate limit exceeded", requestLimit);
         }
 
-        var estimatedInputTokens = Math.Max(1, _tokenCounter.CountTokens(request.Prompt));
-        if (estimatedInputTokens > _options.TokenBucketCapacity)
-            throw new GatewayException(400, "Estimated prompt tokens exceed the configured token-bucket capacity.");
-
-        var tokenLimit = await _state.ConsumeTokenBucketAsync(tenantId, model, estimatedInputTokens, cancellationToken);
+        var tokenLimit = await _state.ConsumeTokenBucketAsync(
+            tenantId, model, estimatedInputTokens, cancellationToken);
         if (!tokenLimit.Allowed)
         {
             _metrics.RecordRejectedRequest("token-bucket");
             throw new GatewayException(429, "Token capacity exhausted", tokenLimit);
         }
 
-        ModelPricing pricing;
-        try { pricing = _pricing.GetPricing(model); }
-        catch (ArgumentException ex) { throw new GatewayException(400, ex.Message); }
-
+        var pricing = _pricing.GetPricing(model);
         var estimatedReservation = checked(
             pricing.CalculateInputCost(estimatedInputTokens) +
             pricing.CalculateOutputCost(_options.MaxOutputTokens));
@@ -93,7 +110,7 @@ public sealed class GatewayService
         if (!reservation.Allowed)
         {
             if (reservation.InProgress || reservation.AlreadySettled)
-                throw new GatewayException(409, "Idempotency key is already in progress or has already been settled.", reservation);
+                throw new GatewayException(409, "Budget reservation already exists for this operation.", reservation);
             throw new GatewayException(402, "Daily tenant budget exceeded", reservation);
         }
 
@@ -106,8 +123,8 @@ public sealed class GatewayService
         }
         catch (OperationCanceledException)
         {
-            // A cancelled HTTP exchange can still have reached the provider. Keep the reservation
-            // rather than falsely refunding a potentially billable operation. Reconciliation is required.
+            // A cancelled HTTP exchange can still have reached the provider. Keep both the budget
+            // reservation and idempotency record locked; a retry must not create a second billable call.
             throw;
         }
         catch (Exception)
@@ -164,6 +181,9 @@ public sealed class GatewayService
         var budgetStatus = await _state.GetBudgetStatusAsync(normalized, cancellationToken);
         return new GatewayStatusResponse(normalized, tokenStatus, windowStatus, budgetStatus, circuitBreaker);
     }
+
+    private string ResolveModel(ChatRequest request) =>
+        string.IsNullOrWhiteSpace(request.Model) ? _provider.PrimaryModel : request.Model.Trim();
 
     private static string BuildReservationId(string? idempotencyKey)
     {
